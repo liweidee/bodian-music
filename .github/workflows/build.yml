@@ -45,11 +45,11 @@ jobs:
           distribution: 'zulu'
           java-version: '17'
 
-      # 3. 安装 Flutter SDK
+      # 3. 安装 Flutter SDK（3.35.1 对应 Dart 3.9.x，满足 pubspec 的 ^3.9.2）
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.0'
+          flutter-version: '3.35.1'
           channel: 'stable'
           cache: true
 
