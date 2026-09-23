@@ -1,7 +1,7 @@
 name: Build Flutter APK
 
 on:
-  # 手动触发（可在 Actions 页面点击运行）
+  # 仅手动触发：Actions 页面 → Build Flutter APK → Run workflow
   workflow_dispatch:
     inputs:
       build_type:
@@ -12,23 +12,16 @@ on:
         options:
           - release
           - debug
-  # 推送到 main 分支自动构建
-  push:
-    branches:
-      - main
-      - master
-    paths-ignore:
-      - '**.md'
-      - '.gitignore'
-      - 'LICENSE'
-  # 打 tag 时自动构建并创建 Release
-  push:
-    tags:
-      - 'v*'
-  pull_request:
-    branches:
-      - main
-      - master
+      create_release:
+        description: '是否创建 Release（勾选后需填写 tag 名称）'
+        required: false
+        default: false
+        type: boolean
+      tag_name:
+        description: 'Release tag（如 v1.0.0，仅 create_release 为 true 时必填）'
+        required: false
+        default: ''
+        type: string
 
 # 权限：创建 Release 需要 contents: write
 permissions:
@@ -56,7 +49,7 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.0'   # 可按需修改，比如 '3.29.0' 或 'stable'
+          flutter-version: '3.24.0'
           channel: 'stable'
           cache: true
 
@@ -68,12 +61,12 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      # 6. 生成 Hive / Riverpod 代码（项目里有 build_runner）
+      # 6. 生成 Hive / Riverpod 代码
       - name: Run build_runner
         run: dart run build_runner build --delete-conflicting-outputs
-        continue-on-error: true   # 若某些生成失败也不阻塞构建
+        continue-on-error: true
 
-      # 7. 静态分析（可选，失败不阻塞）
+      # 7. 静态分析（失败不阻塞）
       - name: Analyze project
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
         continue-on-error: true
@@ -100,7 +93,7 @@ jobs:
           done
           ls -lh build/outputs/
 
-      # 10. 上传构建产物（可在 Actions 运行页面下载）
+      # 10. 上传构建产物（Actions 页面底部下载）
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -108,13 +101,13 @@ jobs:
           path: build/outputs/*.apk
           retention-days: 30
 
-      # 11. 打 tag 时自动创建 Release 并提供下载
+      # 11. 可选：手动勾选 create_release 时创建 Release
       - name: Create Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: ${{ github.event.inputs.create_release == 'true' && github.event.inputs.tag_name != '' }}
         uses: softprops/action-gh-release@v2
         with:
-          name: Release ${{ github.ref_name }}
-          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.event.inputs.tag_name }}
+          tag_name: ${{ github.event.inputs.tag_name }}
           draft: false
           prerelease: false
           generate_release_notes: true
