@@ -1,0 +1,123 @@
+name: Build Flutter APK
+
+on:
+  # 手动触发（可在 Actions 页面点击运行）
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: '构建类型'
+        required: true
+        default: 'release'
+        type: choice
+        options:
+          - release
+          - debug
+  # 推送到 main 分支自动构建
+  push:
+    branches:
+      - main
+      - master
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
+      - 'LICENSE'
+  # 打 tag 时自动构建并创建 Release
+  push:
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+      - master
+
+# 权限：创建 Release 需要 contents: write
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      # 1. 检出代码
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. 安装 Java（Flutter Android 构建必需）
+      - name: Setup Java JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      # 3. 安装 Flutter SDK
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'   # 可按需修改，比如 '3.29.0' 或 'stable'
+          channel: 'stable'
+          cache: true
+
+      # 4. 打印版本信息（方便排查）
+      - name: Flutter doctor
+        run: flutter doctor -v
+
+      # 5. 获取依赖
+      - name: Install dependencies
+        run: flutter pub get
+
+      # 6. 生成 Hive / Riverpod 代码（项目里有 build_runner）
+      - name: Run build_runner
+        run: dart run build_runner build --delete-conflicting-outputs
+        continue-on-error: true   # 若某些生成失败也不阻塞构建
+
+      # 7. 静态分析（可选，失败不阻塞）
+      - name: Analyze project
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+        continue-on-error: true
+
+      # 8. 构建 APK
+      - name: Build APK (release)
+        if: github.event.inputs.build_type != 'debug'
+        run: flutter build apk --release --split-per-abi
+
+      - name: Build APK (debug)
+        if: github.event.inputs.build_type == 'debug'
+        run: flutter build apk --debug
+
+      # 9. 重命名产物，加上版本号与构建号
+      - name: Rename APK artifacts
+        run: |
+          mkdir -p build/outputs
+          VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d'+' -f1)
+          BUILD_NUM=${{ github.run_number }}
+          for f in build/app/outputs/flutter-apk/*.apk; do
+            [ -e "$f" ] || continue
+            base=$(basename "$f" .apk)
+            cp "$f" "build/outputs/${base}-v${VERSION}-build${BUILD_NUM}.apk"
+          done
+          ls -lh build/outputs/
+
+      # 10. 上传构建产物（可在 Actions 运行页面下载）
+      - name: Upload APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lx-music-flutter-apk-${{ github.run_number }}
+          path: build/outputs/*.apk
+          retention-days: 30
+
+      # 11. 打 tag 时自动创建 Release 并提供下载
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Release ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: build/outputs/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
